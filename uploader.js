@@ -140,8 +140,8 @@ module.exports = function (params, req, res, cb) {
                     dataLength += data.length;
 
                     if (dataLength >= 262) {
-                        var buffer = Buffer.concat(buffers);
-                        var mimeType = fileType(buffer);
+                        var mimeData = Buffer.concat(buffers);
+                        var mimeType = fileType(mimeData);
                         if (!mimeType || params.contentTypes.indexOf(mimeType.mime) < 0) {
                             // received file extension error
                             return callback(415);
@@ -151,7 +151,7 @@ module.exports = function (params, req, res, cb) {
                             fileExtension = mimeType.ext;
                         }
 
-                        return callback(null, buffer);
+                        return callback(null, mimeData);
                     }
 
                     checkMimeType();
