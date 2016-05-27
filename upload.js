@@ -14,6 +14,7 @@ var fileType = require('file-type');
 var fs = require('fs');
 var path = require('path');
 var mkdirp = require('mkdirp');
+var mime = require('mime');
 
 var guid = function () {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
@@ -27,7 +28,11 @@ module.exports = function (params, req, res, cb) {
         dest = params.destFolder || './',
         contentLength = 0,
         timeout,
-        fileStream;
+        fileStream,
+        fileExtension;
+
+    // init params
+    params.minFileSize = params.minFileSize || 1;
 
     var finalCallback = function (code, data) {
         if (fileStream) {
@@ -96,6 +101,7 @@ module.exports = function (params, req, res, cb) {
                 // request entity content type error
                 return callback(415);
             }
+            fileExtension = mime.extension(contentType);
 
             callback(null);
         },
@@ -125,7 +131,7 @@ module.exports = function (params, req, res, cb) {
                 buffers = [];
 
             if (!params.deepCheckMime) {
-                return callback(null, null, null);
+                return callback(null, null);
             }
 
             var checkMimeType = function () {
@@ -141,7 +147,11 @@ module.exports = function (params, req, res, cb) {
                             return callback(415);
                         }
 
-                        return callback(null, buffer, mimeType);
+                        if (mimeType && mimeType.ext) {
+                            fileExtension = mimeType.ext;
+                        }
+
+                        return callback(null, buffer);
                     }
 
                     checkMimeType();
@@ -151,7 +161,7 @@ module.exports = function (params, req, res, cb) {
             checkMimeType();
         },
         // receive data
-        function (mimeData, mimeType, callback) {
+        function (mimeData, callback) {
             var dataListener,
                 buffers = [],
                 dataLength;
@@ -200,7 +210,7 @@ module.exports = function (params, req, res, cb) {
                     break;
                 case 'file':
                     var fileName = params.destFileName || req.headers[params.fileNameHeader] || guid();
-                    dest = path.join(dest, fileName + (mimeType ? '.' + mimeType.ext : ''));
+                    dest = path.join(dest, fileName + (fileExtension ? '.' + fileExtension : ''));
 
                     if (!params.overwrite && fs.existsSync(dest)) {
                         return callback(409);
