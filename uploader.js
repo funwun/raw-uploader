@@ -97,7 +97,7 @@ module.exports = function (params, req, res, cb) {
             }
 
             var contentType = req.headers['content-type'];
-            if (params.contentTypes.indexOf(contentType) < 0) {
+            if (!contentType || params.contentTypes.indexOf(contentType) < 0) {
                 // request entity content type error
                 return callback(415);
             }
