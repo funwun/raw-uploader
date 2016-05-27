@@ -38,7 +38,7 @@ app.post('/', function (req, res) {
 ```
 ## API
 
-### uploader([`options`, `req`, `res` [, `callback`]])
+### uploader(`options`, `req`, `res` [, `callback`])
 
 Upload file.
 
