@@ -1,0 +1,35 @@
+{
+  "name": "raw-uploader",
+  "version": "0.0.1",
+  "main": "./uploader.js",
+  "description": "raw body upload library for node.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/funwun/raw-uploader.git"
+  },
+  "keywords": [
+    "restful",
+    "raw",
+    "upload"
+  ],
+  "author": {
+    "email": "kekuer@gmail.com",
+    "name": "Lewis Deng"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/funwun/raw-uploader/issues"
+  },
+  "homepage": "https://github.com/funwun/raw-uploader#readme",
+  "dependencies": {
+    "async": "^2.0.0-rc.5",
+    "file-type": "^3.8.0",
+    "mkdirp": "^0.5.1"
+  },
+  "devDependencies": {
+    "express": "^4.13.4"
+  }
+}
