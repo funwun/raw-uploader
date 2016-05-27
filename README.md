@@ -1,2 +1,2 @@
-# rest-uploader
-restful file upload library for node.js
+# raw-uploader
+raw body upload library for node.js
