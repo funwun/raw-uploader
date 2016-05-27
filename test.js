@@ -1,7 +1,6 @@
 var express = require('express');
 var app = express();
 var uploader = require('raw-uploader');
-var bodyParser = require('body-parser');
 var http = require('http');
 
 app.post('/', function (req, res) {
