@@ -1,11 +1,11 @@
 var express = require('express');
 var app = express();
-var upload = require('./upload');
+var uploader = require('raw-uploader');
 var bodyParser = require('body-parser');
 var http = require('http');
 
 app.post('/', function (req, res) {
-    upload({
+    uploader({
         contentTypes: ['image/png', 'text/plain'],
         minFileSize: 100,
         maxFileSize: 1000000000,
