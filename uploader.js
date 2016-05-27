@@ -34,6 +34,8 @@ module.exports = function (params, req, res, cb) {
     // init params
     params.minFileSize = params.minFileSize || 1;
 
+    
+    // final callback 
     var finalCallback = function (code, data) {
         if (fileStream) {
             fileStream.end();
@@ -51,6 +53,7 @@ module.exports = function (params, req, res, cb) {
             fs.unlink(dest);
         }
 
+        // destroy connection when upload failed
         if (code != 200) {
             if (params.disconnectOnErr) {
                 res.sendStatus(code);
@@ -61,8 +64,9 @@ module.exports = function (params, req, res, cb) {
         cb(code, data);
     };
 
+    // add error listener
     var errorListener = function (err) {
-        // receive file error
+        // receive file failed or aborted
         finalCallback(500);
     };
     req.on('error', errorListener)
@@ -76,6 +80,7 @@ module.exports = function (params, req, res, cb) {
     });
 
     async.waterfall([
+        // create dest folder
         function (callback) {
             if (params.createDestFolder) {
                 return mkdirp(dest, function (err) {
@@ -134,6 +139,7 @@ module.exports = function (params, req, res, cb) {
                 return callback(null, null);
             }
 
+            // check mime type
             var checkMimeType = function () {
                 req.once('data', function (data) {
                     buffers.push(data);
@@ -146,7 +152,8 @@ module.exports = function (params, req, res, cb) {
                             // received file extension error
                             return callback(415);
                         }
-
+                        
+                        // get file extension from mime
                         if (mimeType && mimeType.ext) {
                             fileExtension = mimeType.ext;
                         }
@@ -171,6 +178,7 @@ module.exports = function (params, req, res, cb) {
                 dataLength = mimeData.length;
             }
 
+            // check file size
             var checkSize = function () {
                 if (dataLength > params.maxFileSize || dataLength > contentLength) {
                     // received file size too large
@@ -178,6 +186,7 @@ module.exports = function (params, req, res, cb) {
                 }
             };
 
+            // requset end listener
             var endListener = function () {
                 if (res.statusCode != 200) {
                     return callback(res.statusCode);
@@ -213,9 +222,11 @@ module.exports = function (params, req, res, cb) {
                     dest = path.join(dest, fileName + (fileExtension ? '.' + fileExtension : ''));
 
                     if (!params.overwrite && fs.existsSync(dest)) {
+                        // file exists
                         return callback(409);
                     }
                     else {
+                        // pipe stream to file
                         fileStream = fs.createWriteStream(dest, { 'flags': 'w' });
                         if (mimeData) {
                             fileStream.write(mimeData);
@@ -229,6 +240,7 @@ module.exports = function (params, req, res, cb) {
                     break;
             }
 
+            // add listeners
             if (dataListener) {
                 req.on('data', dataListener);
                 listeners.push({
