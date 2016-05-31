@@ -119,11 +119,8 @@ module.exports = class Uploader extends EventEmitter {
     set outputs(outputs) {
         this._outputs = [];
         if (outputs) {
-            for (var i = 0; i < outputs.length; i++) {
-                const output = outputs[i];
-                this._outputs.push(i == outputs.length - 1 ?
-                    new OutputWritable(output) :
-                    new OutputWritable(output));
+            for (const output of outputs) {
+                this._outputs.push(new OutputWritable(output));
             }
         }
     }
