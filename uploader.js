@@ -1,261 +1,180 @@
 // params
-// contentTypes      Array
-// minFileSize       int
-// maxFileSize       int
-// outputType        string
-// overwrite         bool
-// destFolder        string
-// destFileName      string
-// disconnectOnErr   bool
-// createDestFolder  bool
-// deepCheckMime     bool
-var async = require('async');
-var fileType = require('file-type');
-var fs = require('fs');
-var path = require('path');
-var mkdirp = require('mkdirp');
-var mime = require('mime');
+// contentTypes     Array
+// minFileSize      int
+// maxFileSize      int
+// outputType       string
+// overwrite        bool
+// destFolder       string
+// destFileName     string
+// disconnectOnErr  bool
+// createDestFolder bool
+// deepCheckMime    bool
 
-var guid = function () {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
+// filters          Array
+const async = require('async'),
+    fs = require('fs'),
+    path = require('path'),
+    mkdirp = require('mkdirp'),
+    mime = require('mime'),
+    _ = require('lodash'),
+    Transform = require('stream').Transform,
+    Writable = require('stream').Writable,
+    EventEmitter = require('events');
+
+class BodyFilter extends Transform {
+    constructor(filters, options) {
+        super(options);
+
+        const self = this;
+        self._filters = filters;
+        self._filtered = false;
+    }
+
+    get filtered() {
+        return this._filtered;
+    }
+
+    get code() {
+        return this._code;
+    }
+
+    _transform(chunk, encoding, done) {
+        const self = this;
+
+        var filters = [];
+
+        for (const filter of self._filters) {
+            filters.push(function (callback) {
+                filter._body(chunk, (code) => {
+                    callback(code || null);
+                })
+            });
+        }
+
+        async.waterfall(filters, (code) => {
+            if (!code) {
+                self.push(chunk);
+                return done();
+            }
+
+            // filtered
+            self._filtered = true;
+            self._code = code;
+            self.unpipe();
+        });
+    }
 }
 
-module.exports = function (params, req, res, cb) {
-    var listeners = [],
-        dest = params.destFolder || './',
-        contentLength = 0,
-        timeout,
-        fileStream,
-        fileExtension;
+class OutputWritable extends Writable {
+    constructor(output, options) {
+        super(options);
+        const self = this;
+        self._output = output;
 
-    // init params
-    params.minFileSize = params.minFileSize || 1;
-
-    
-    // final callback 
-    var finalCallback = function (code, data) {
-        if (fileStream) {
-            fileStream.end();
-        }
-        if (timeout) {
-            clearTimeout(timeout);
-        }
-        for (var i = 0; i < listeners.length; i++) {
-            var listener = listeners[i];
-            var event = Object.keys(listener)[0];
-            var func = listener[event];
-            req.removeListener(event, func);
-        }
-        if (code != 200 && code != 409 && fs.lstatSync(dest).isFile()) {
-            fs.unlink(dest);
-        }
-
-        // destroy connection when upload failed
-        if (code != 200) {
-            if (params.disconnectOnErr) {
-                res.sendStatus(code);
-                req.destroy();
-            }
-        }
-
-        cb(code, data);
-    };
-
-    // add error listener
-    var errorListener = function (err) {
-        // receive file failed or aborted
-        finalCallback(500);
-    };
-    req.on('error', errorListener)
-        .on('aborted', errorListener);
-
-    listeners.push({
-        error: errorListener
-    });
-    listeners.push({
-        aborted: errorListener
-    });
-
-    async.waterfall([
-        // create dest folder
-        function (callback) {
-            if (params.createDestFolder) {
-                return mkdirp(dest, function (err) {
-                    if (err) {
-                        callback(403);
-                        return;
-                    }
-
-                    callback(null);
+        self.on('unpipe', (source) => {
+            if (!source.filtered) {
+                return self._output._end((label, data) => {
+                    self.emit('done', label, data);
                 });
             }
 
-            callback(null);
-        },
-        // check content type
-        function (callback) {
-            if (!Array.isArray(params.contentTypes)) {
-                return callback(null);
-            }
+            self._output._error(new Error('unpipe'), () => {
+                self.emit('filtered', source.code, 'body');
+            });
+        });
+        self.on('error', (err) => {
+            self._output._error(err, () => {
+                self.emit('_error', err);
+            });
+        });
+    }
 
-            var contentType = req.headers['content-type'];
-            if (!contentType || params.contentTypes.indexOf(contentType) < 0) {
-                // request entity content type error
-                return callback(415);
-            }
-            fileExtension = mime.extension(contentType);
+    _write(chunk, encoding, next) {
+        this._output._process(chunk, next);
+    }
+}
 
-            callback(null);
-        },
-        // check content length
-        function (callback) {
-            contentLength = req.headers['content-length'];
-            if (contentLength === undefined) {
-                // length required
-                return callback(411);
-            }
-            contentLength = parseInt(contentLength) || 0;
-            if (params.minFileSize && contentLength < params.minFileSize) {
-                // request entity too small
-                return callback(422);
-            }
+module.exports = class Uploader extends EventEmitter {
+    constructor(req) {
+        super();
+        this._req = req;
+    }
 
-            if (params.maxFileSize && contentLength > params.maxFileSize) {
-                // request entity too large
-                return callback(413);
-            }
+    set req(req) {
+        this._req = req;
+    }
 
-            callback(null);
-        },
-        // deep check mime type
-        function (callback) {
-            var dataLength = 0,
-                buffers = [];
+    set filters(filters) {
+        const self = this;
+        self._headerFilters = [];
 
-            if (!params.deepCheckMime) {
-                return callback(null, null);
-            }
-
-            // check mime type
-            var checkMimeType = function () {
-                req.once('data', function (data) {
-                    buffers.push(data);
-                    dataLength += data.length;
-
-                    if (dataLength >= 262) {
-                        var mimeData = Buffer.concat(buffers);
-                        var mimeType = fileType(mimeData);
-                        if (!mimeType || params.contentTypes.indexOf(mimeType.mime) < 0) {
-                            // received file extension error
-                            return callback(415);
-                        }
-                        
-                        // get file extension from mime
-                        if (mimeType && mimeType.ext) {
-                            fileExtension = mimeType.ext;
-                        }
-
-                        return callback(null, mimeData);
+        if (Array.isArray(filters)) {
+            var bodyFilters = [];
+            for (const filter of filters) {
+                filter.req = self._req;
+                self._headerFilters.push(function (callback) {
+                    if (filter._header) {
+                        filter._header(callback);
                     }
-
-                    checkMimeType();
                 });
-            };
 
-            checkMimeType();
-        },
-        // receive data
-        function (mimeData, callback) {
-            var dataListener,
-                buffers = [],
-                dataLength;
-
-            if (mimeData) {
-                buffers.push(mimeData);
-                dataLength = mimeData.length;
+                if (filter._body) {
+                    bodyFilters.push(filter);
+                }
             }
 
-            // check file size
-            var checkSize = function () {
-                if (dataLength > params.maxFileSize || dataLength > contentLength) {
-                    // received file size too large
-                    return callback(413);
-                }
-            };
-
-            // requset end listener
-            var endListener = function () {
-                if (res.statusCode != 200) {
-                    return callback(res.statusCode);
-                }
-
-                if (dataLength < params.minFileSize) {
-                    // received file size too small
-                    return callback(422);
-                }
-
-                switch (params.outputType) {
-                    default:
-                    case 'buffer':
-                        callback(200, Buffer.concat(buffers));
-                        break;
-                    case 'file':
-                        callback(200, path.resolve(dest));
-                        break;
-                }
-            };
-
-            switch (params.outputType) {
-                default:
-                case 'buffer':
-                    dataListener = function (data) {
-                        dataLength += data.length;
-                        buffers.push(data);
-                        checkSize();
-                    };
-                    break;
-                case 'file':
-                    var fileName = params.destFileName || req.headers[params.fileNameHeader] || guid();
-                    dest = path.join(dest, fileName + (fileExtension ? '.' + fileExtension : ''));
-
-                    if (!params.overwrite && fs.existsSync(dest)) {
-                        // file exists
-                        return callback(409);
-                    }
-                    else {
-                        // pipe stream to file
-                        fileStream = fs.createWriteStream(dest, { 'flags': 'w' });
-                        if (mimeData) {
-                            fileStream.write(mimeData);
-                        }
-                        req.pipe(fileStream);
-                        dataListener = function (data) {
-                            dataLength += data.length;
-                            checkSize();
-                        };
-                    }
-                    break;
-            }
-
-            // add listeners
-            if (dataListener) {
-                req.on('data', dataListener);
-                listeners.push({
-                    data: dataListener
-                });
-            }
-
-            if (endListener) {
-                req.once('end', endListener);
-                listeners.push({
-                    end: endListener
-                });
+            if (bodyFilters.length > 0) {
+                self._bodyFilter = new BodyFilter(bodyFilters);
             }
         }
-    ], function (code, data) {
-        finalCallback(code, data);
-    });
-};
+    }
+
+    set outputs(outputs) {
+        this._outputs = [];
+        if (outputs) {
+            for (var i = 0; i < outputs.length; i++) {
+                const output = outputs[i];
+                this._outputs.push(i == outputs.length - 1 ?
+                    new OutputWritable(output) :
+                    new OutputWritable(output));
+            }
+        }
+    }
+
+    upload() {
+        const self = this;
+        var filteredEmited = false;
+
+        // header filters
+        async.waterfall(self._headerFilters, (code) => {
+            if (code) {
+                // emit header filter error
+                return self.emit('filtered', code, 'header');
+            }
+
+            var pipeStream = self._req;
+
+            // body filters
+            if (self._bodyFilter) {
+                pipeStream = pipeStream.pipe(self._bodyFilter);
+            }
+
+            // outputs
+            for (const output of self._outputs) {
+                output.on('done', (label, data) => {
+                    self.emit('done', label, data);
+                });
+                output.on('filtered', (code, pos) => {
+                    if (!filteredEmited) {
+                        self.emit('filtered', code, pos);
+                    }
+                    filteredEmited = true;
+                });
+                output.on('_error', (err) => {
+                    self.emit('error', err);
+                });
+                pipeStream.pipe(output);
+            }
+        });
+    }
+}
