@@ -1,16 +1,3 @@
-// params
-// contentTypes     Array
-// minFileSize      int
-// maxFileSize      int
-// outputType       string
-// overwrite        bool
-// destFolder       string
-// destFileName     string
-// disconnectOnErr  bool
-// createDestFolder bool
-// deepCheckMime    bool
-
-// filters          Array
 const async = require('async'),
     fs = require('fs'),
     path = require('path'),
