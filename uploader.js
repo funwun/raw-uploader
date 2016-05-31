@@ -1,4 +1,4 @@
-const async = require('async'),
+const waterfall = require('async/waterfall'),
     fs = require('fs'),
     path = require('path'),
     mkdirp = require('mkdirp'),
@@ -13,13 +13,21 @@ class BodyFilter extends Transform {
         super(options);
 
         const self = this;
-        self._filters = filters;
-        self._filtered = false;
+        // self._filters = filters;
+        self._isFiltered = false;
+
+        self._filters = _.map(filters, (filter) => {
+            return function (chunk, callback) {
+                filter._body(chunk, (code) => {
+                    callback(code || null, chunk);
+                });
+            };
+        });
     }
 
     // get if body is filtered
     get isFiltered() {
-        return this._filtered;
+        return this._isFiltered;
     }
 
     // get error code
@@ -30,24 +38,18 @@ class BodyFilter extends Transform {
     _transform(chunk, encoding, done) {
         const self = this;
 
-        var filters = [];
+        var filters = [function (callback) {
+            callback(null, chunk);
+        }].concat(self._filters);
 
-        for (const filter of self._filters) {
-            filters.push(function (callback) {
-                filter._body(chunk, (code) => {
-                    callback(code || null);
-                })
-            });
-        }
-
-        async.waterfall(filters, (code) => {
+        waterfall(filters, (code) => {
             if (!code) {
                 self.push(chunk);
                 return done();
             }
 
             // filtered
-            self._filtered = true;
+            self._isFiltered = true;
             self._code = code;
             self.unpipe();
         });
@@ -132,7 +134,7 @@ module.exports = class Uploader extends EventEmitter {
         var filteredEmited = false;
 
         // header filters
-        async.waterfall(self._headerFilters, (code) => {
+        waterfall(self._headerFilters, (code) => {
             if (code) {
                 // emit header filter error
                 return self.emit('filtered', code, 'header');
