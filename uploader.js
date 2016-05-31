@@ -17,10 +17,12 @@ class BodyFilter extends Transform {
         self._filtered = false;
     }
 
-    get filtered() {
+    // get if body is filtered
+    get isFiltered() {
         return this._filtered;
     }
 
+    // get error code
     get code() {
         return this._code;
     }
@@ -59,18 +61,18 @@ class OutputWritable extends Writable {
         self._output = output;
 
         self.on('unpipe', (source) => {
-            if (!source.filtered) {
-                return self._output._end((label, data) => {
+            if (!source.isFiltered) {
+                return output._end((label, data) => {
                     self.emit('done', label, data);
                 });
             }
 
-            self._output._error(new Error('unpipe'), () => {
+            output._error(new Error('unpipe'), () => {
                 self.emit('filtered', source.code, 'body');
             });
         });
         self.on('error', (err) => {
-            self._output._error(err, () => {
+            output._error(err, () => {
                 self.emit('_error', err);
             });
         });
