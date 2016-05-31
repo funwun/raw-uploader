@@ -6,13 +6,15 @@ module.exports = class BufferOutput {
     }
 
     _process(chunk, next) {
-        this._chunks.push(chunk);
+        const self = this;
+        self._chunks.push(chunk);
         next();
     }
 
     _end(callback) {
-        const buffer = Buffer.concat(this._chunks);
-        callback(this._label, {
+        const self = this;
+        const buffer = Buffer.concat(self._chunks);
+        callback(self._label, {
             buffer: buffer
         });
     }

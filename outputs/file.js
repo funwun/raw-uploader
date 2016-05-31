@@ -23,7 +23,6 @@ module.exports = class FileOutput {
 
     _process(chunk, next) {
         const self = this;
-
         var finished = false;
 
         const writeChunk = function (chunk) {
@@ -34,9 +33,9 @@ module.exports = class FileOutput {
             }
         };
 
-        if (this._firstChunk) {
-            this._firstChunk = false;
-            var fileStream = fs.createWriteStream(this._tmpDest, { 'flags': 'w' });
+        if (self._firstChunk) {
+            self._firstChunk = false;
+            var fileStream = fs.createWriteStream(self._tmpDest, { 'flags': 'w' });
 
             fileStream.on('error', (err) => {
                 self._error(err);
@@ -47,7 +46,7 @@ module.exports = class FileOutput {
             });
 
             fileStream.on('open', () => {
-                mkdirp(this._options.destFolder, function (err) {
+                mkdirp(self._options.destFolder, function (err) {
                     if (err) {
                         return self._error(err);
                     }
@@ -56,8 +55,7 @@ module.exports = class FileOutput {
                 });
             });
 
-            this._fileStream = fileStream;
-
+            self._fileStream = fileStream;
             return;
         }
 
@@ -67,22 +65,22 @@ module.exports = class FileOutput {
     _end(callback) {
         const self = this;
         const dest = path.resolve(path.join(self._destFolder, self._fileName));
-        if (this._fileStream) {
-            this._fileStream.end(() => {
+        if (self._fileStream) {
+            self._fileStream.end(() => {
                 fs.rename(self._tmpDest, dest);
             });
         }
 
-        callback(this._label, {
-            fileSize: this._length,
+        callback(self._label, {
+            fileSize: self._length,
             filePath: dest
         });
     }
 
     _error(err, callback) {
         const self = this;
-        if (this._fileStream) {
-            this._fileStream.end(() => {
+        if (self._fileStream) {
+            self._fileStream.end(() => {
                 fs.unlink(self._tmpDest, () => {
                     if (callback) {
                         callback();
