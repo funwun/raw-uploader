@@ -11,11 +11,12 @@ const guid = function () {
 
 module.exports = class FileOutput {
     constructor(options) {
-        this._options = options;
-        this._label = options.label || 'file';
+        this._options = options || {};
+        this._label = this._options.label || 'file';
 
-        this._destFolder = options.destFolder;
-        this._fileName = options.fileName;
+        // TODO: add default options
+        this._destFolder = this._options.destFolder || './';
+        this._fileName = this._options.fileName;
         this._tmpDest = path.resolve(path.join(this._destFolder, guid() + '.tmp'));
         this._length = 0;
         this._firstChunk = true;
@@ -38,17 +39,13 @@ module.exports = class FileOutput {
             var fileStream = fs.createWriteStream(self._tmpDest, { 'flags': 'w' });
 
             fileStream.on('error', (err) => {
-                self._error(err);
-            });
-
-            fileStream.on('finish', () => {
+                self._cancel(err);
+            }).on('finish', () => {
                 finished = true;
-            });
-
-            fileStream.on('open', () => {
+            }).on('open', () => {
                 mkdirp(self._options.destFolder, function (err) {
                     if (err) {
-                        return self._error(err);
+                        return self._cancel(err);
                     }
 
                     writeChunk(chunk);
@@ -77,7 +74,7 @@ module.exports = class FileOutput {
         });
     }
 
-    _error(err, callback) {
+    _cancel(err, callback) {
         const self = this;
         if (self._fileStream) {
             self._fileStream.end(() => {

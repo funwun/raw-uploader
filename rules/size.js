@@ -1,4 +1,4 @@
-module.exports = class SizeFilter {
+module.exports = class SizeRule {
     constructor(options) {
         this.options = options;
         this.length = 0;

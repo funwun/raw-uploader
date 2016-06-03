@@ -1,8 +1,8 @@
 module.exports = class BufferOutput {
     constructor(options) {
-        this._options = options;
+        this._options = options || {};
         this._chunks = [];
-        this._label = options.label || 'buffer';
+        this._label = this._options.label || 'buffer';
     }
 
     _process(chunk, next) {
@@ -19,7 +19,7 @@ module.exports = class BufferOutput {
         });
     }
 
-    _error(err, callback) {
+    _cancel(err, callback) {
         if (callback) {
             callback();
         }

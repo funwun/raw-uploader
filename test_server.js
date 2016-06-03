@@ -1,20 +1,21 @@
 var express = require('express');
 var app = express();
 var Uploader = require('./uploader');
-var SizeFilter = require('./filters/size');
-var MimeFilter = require('./filters/mime');
+var SizeRule = require('./rules/size');
+var MimeRule = require('./rules/mime');
 var BufferOutput = require('./outputs/buffer');
 var FileOutput = require('./outputs/file');
 var http = require('http');
 
 app.post('/', function (req, res) {
-    const uploader = new Uploader(req);
-    uploader.filters = [
-        new SizeFilter({
+    console.log('\n>> new request');
+    const uploader = new Uploader();
+    uploader.rules = [
+        new SizeRule({
             min: 100,
-            max: 1000000000
+            max: 361430
         }),
-        new MimeFilter({
+        new MimeRule({
             types: [
                 'image/jpeg'
             ]
@@ -25,25 +26,40 @@ app.post('/', function (req, res) {
         new FileOutput({
             destFolder: './abc',
             fileName: 'abcd.jpg',
-            overwrite: true
+            overwrite: true,
+
         }),
-        new BufferOutput({})
+        new BufferOutput()
     ];
 
     uploader.on('error', (err) => {
         console.log('error:', err);
-    }).on('filtered', (code, pos) => {
-        console.log('filtered:', code, 'pos:', pos);
-        res.sendStatus(code);
+    }).on('timeout', () => {
+        console.log('timeout');
+        res.statusCode = 408;
+        res.end();
+    }).on('aborted', () => {
+        console.log('aborted');
+    }).on('invalid', (code, pos) => {
+        res.statusCode = code;
+        res.write(JSON.stringify({
+            'invalid': code,
+            'pos': pos
+        }));
+        console.log('invalid', JSON.stringify({ code: code, position: pos }));
         res.destroy();
-    }).on('done', (label, data) => {
+    }).on('finish', (label, data) => {
         console.log(label, data);
         if (label == 'file') {
-            res.sendStatus(200);
+            res.statusCode = 200;
+            res.write(JSON.stringify(data));
+            res.end();
         }
     });
 
-    uploader.upload();
+    uploader.process({
+        timeout: 1000
+    }, req);
 });
 
 http.createServer(app).listen(4000);

@@ -8,26 +8,19 @@ const waterfall = require('async/waterfall'),
     Writable = require('stream').Writable,
     EventEmitter = require('events');
 
-class BodyFilter extends Transform {
-    constructor(filters, options) {
+class BodyRule extends Transform {
+    constructor(rules, options) {
         super(options);
 
         const self = this;
-        // self._filters = filters;
-        self._isFiltered = false;
 
-        self._filters = _.map(filters, (filter) => {
+        self._rules = _.map(rules, (rule) => {
             return function (chunk, callback) {
-                filter._body(chunk, (code) => {
+                rule._body(chunk, (code) => {
                     callback(code || null, chunk);
                 });
             };
         });
-    }
-
-    // get if body is filtered
-    get isFiltered() {
-        return this._isFiltered;
     }
 
     // get error code
@@ -38,130 +31,160 @@ class BodyFilter extends Transform {
     _transform(chunk, encoding, done) {
         const self = this;
 
-        var filters = [function (callback) {
+        const rules = [function (callback) {
             callback(null, chunk);
-        }].concat(self._filters);
+        }].concat(self._rules);
 
-        waterfall(filters, (code) => {
-            if (!code) {
-                self.push(chunk);
-                return done();
+        waterfall(rules, (code) => {
+            if (code) {
+                return self.emit('invalid', code);
             }
 
-            // filtered
-            self._isFiltered = true;
-            self._code = code;
-            self.unpipe();
+            self.push(chunk);
+            done();
         });
-    }
-}
-
-class OutputWritable extends Writable {
-    constructor(output, options) {
-        super(options);
-        const self = this;
-        self._output = output;
-
-        self.on('unpipe', (source) => {
-            if (!source.isFiltered) {
-                return output._end((label, data) => {
-                    self.emit('done', label, data);
-                });
-            }
-
-            output._error(new Error('unpipe'), () => {
-                self.emit('filtered', source.code, 'body');
-            });
-        });
-        self.on('error', (err) => {
-            output._error(err, () => {
-                self.emit('_error', err);
-            });
-        });
-    }
-
-    _write(chunk, encoding, next) {
-        this._output._process(chunk, next);
     }
 }
 
 module.exports = class Uploader extends EventEmitter {
-    constructor(req) {
+    constructor() {
         super();
-        this._req = req;
     }
 
-    set req(req) {
-        this._req = req;
-    }
-
-    set filters(filters) {
-        const self = this;
-        self._headerFilters = [];
-
-        if (Array.isArray(filters)) {
-            var bodyFilters = [];
-            for (const filter of filters) {
-                filter.req = self._req;
-                self._headerFilters.push(function (callback) {
-                    if (filter._header) {
-                        filter._header(callback);
-                    }
-                });
-
-                if (filter._body) {
-                    bodyFilters.push(filter);
-                }
-            }
-
-            if (bodyFilters.length > 0) {
-                self._bodyFilter = new BodyFilter(bodyFilters);
-            }
-        }
+    set rules(rules) {
+        this._rules = rules;
     }
 
     set outputs(outputs) {
-        this._outputs = [];
-        if (outputs) {
-            for (const output of outputs) {
-                this._outputs.push(new OutputWritable(output));
-            }
-        }
+        this._outputs = outputs;
+
     }
 
-    upload() {
-        const self = this;
-        var filteredEmited = false;
+    get rules() {
+        return this._rules;
+    }
 
-        // header filters
-        waterfall(self._headerFilters, (code) => {
-            if (code) {
-                // emit header filter error
-                return self.emit('filtered', code, 'header');
+    get outputs() {
+        return this._outputs;
+    }
+
+    process(options, req) {
+        options = options || {};
+
+        const self = this;
+        const timeout = parseInt(options.timeout);
+        var invalid = false;
+
+        var writables = [];
+        if (Array.isArray(self.outputs)) {
+            for (const output of self.outputs) {
+                var writable = new Writable(output);
+                writable._write = (chunk, encoding, next) => {
+                    output._process(chunk, next);
+                };
+
+                writable.on('finish', () => {
+                    output._end((label, data) => {
+                        self.emit('finish', label, data);
+                    });
+                }).on('error', (err) => {
+                    output._cancel(err, () => {
+                        self.emit('error', err);
+                    });
+                }).on('aborted', () => {
+                    output._cancel(new Error('aborted'), () => {
+
+                    });
+                });
+                writables.push(writable);
+            }
+        }
+
+        // timeout
+        if (timeout > 0) {
+            const resetReqTimeout = function (reqTimeout) {
+                if (reqTimeout) {
+                    clearTimeout(reqTimeout);
+                }
+                return setTimeout(() => {
+                    for (const writable of writables) {
+                        writable.emit('aborted');
+                    }
+                    self.emit('timeout');
+                }, timeout);
+            };
+
+            var reqTimeout = resetReqTimeout();
+            req.on('data', () => {
+                reqTimeout = resetReqTimeout(reqTimeout);
+            });
+        }
+
+        req.once('aborted', () => { // request aborted
+            clearTimeout(reqTimeout);
+
+            // header or body "invalid" event is not emitted
+            if (!invalid) {
+                for (const writable of writables) {
+                    writable.emit('aborted');
+                }
+                self.emit('aborted');
+            }
+        }).once('end', () => {
+            clearTimeout(reqTimeout);
+        }).once('error', () => {
+            clearTimeout(reqTimeout);
+        });
+
+        var headerRules = [],
+            bodyRule;
+
+        if (Array.isArray(self._rules)) {
+            var bodyRules = [];
+            for (const rule of self._rules) {
+                rule.req = req;
+                if (rule._header) {
+                    headerRules.push(function (callback) {
+                        rule._header(callback);
+                    });
+                }
+                if (rule._body) {
+                    bodyRules.push(rule);
+                }
             }
 
-            var pipeStream = self._req;
+            if (bodyRules.length > 0) {
+                bodyRule = new BodyRule(bodyRules);
+                bodyRule.req = req;
+                bodyRule.on('invalid', (code) => {
+                    self.emit('invalid', code, 'body');
+                });
+            }
+        }
 
-            // body filters
-            if (self._bodyFilter) {
-                pipeStream = pipeStream.pipe(self._bodyFilter);
+        self.once('invalid', () => {
+            invalid = true;
+            for (const writable of writables) {
+                writable.emit('aborted');
+            }
+        });
+
+        // header rules
+        waterfall(headerRules, (code) => {
+            if (code) {
+                return self.emit('invalid', code, 'header');
+            }
+
+            var pipeStream = req;
+
+            // body rules
+            if (bodyRule) {
+                pipeStream = pipeStream.pipe(bodyRule);
             }
 
             // outputs
-            for (const output of self._outputs) {
-                output.on('done', (label, data) => {
-                    self.emit('done', label, data);
-                });
-                output.on('filtered', (code, pos) => {
-                    if (!filteredEmited) {
-                        self.emit('filtered', code, pos);
-                    }
-                    filteredEmited = true;
-                });
-                output.on('_error', (err) => {
-                    self.emit('error', err);
-                });
-                pipeStream.pipe(output);
+            for (const writable of writables) {
+                pipeStream.pipe(writable);
             }
         });
     }

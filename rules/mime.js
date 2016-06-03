@@ -1,14 +1,14 @@
 const fileType = require('file-type');
 
-module.exports = class MimeFilter {
+module.exports = class MimeRule {
     constructor(options) {
-        this.options = options;
-        this.mimeChunks = [];
+        this._options = options;
+        this._mimeChunks = [];
         this._label = 'mime';
     }
 
     _header(callback) {
-        const types = this.options.types;
+        const types = this._options.types;
         if (!Array.isArray(types)) {
             return callback(null);
         }
@@ -24,22 +24,24 @@ module.exports = class MimeFilter {
     }
 
     _body(chunk, callback) {
-        if (this.verified) {
+        const self = this;
+        
+        if (self.verified) {
             return callback(null);
         }
 
-        this.length += chunk.length;
-        this.mimeChunks.push(chunk);
+        self.length += chunk.length;
+        self._mimeChunks.push(chunk);
 
-        if (this.length < 262) {
+        if (self.length < 262) {
             return callback(null);
         }
 
-        this.verified = true;
-        const mimeChunk = Buffer.concat(this.mimeChunks);
+        self.verified = true;
+        const mimeChunk = Buffer.concat(self._mimeChunks);
         const mimeType = fileType(mimeChunk);
 
-        if (!mimeType || this.options.types.indexOf(mimeType.mime) < 0) {
+        if (!mimeType || self._options.types.indexOf(mimeType.mime) < 0) {
             // received file extension error
             return callback(415);
         }
